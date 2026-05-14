@@ -14,10 +14,23 @@ from YesCaptcha_service import TurnstileService
 # 基础配置
 site_url = "https://accounts.x.ai"
 user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
-PROXIES = {
-    # "http": "http://127.0.0.1:10808",
-    # "https": "http://127.0.0.1:10808"
-}
+
+
+def load_proxies() -> dict:
+    http_proxy = str(os.getenv("HTTP_PROXY") or os.getenv("http_proxy") or "").strip()
+    https_proxy = str(os.getenv("HTTPS_PROXY") or os.getenv("https_proxy") or "").strip()
+
+    proxies = {}
+    if http_proxy:
+        proxies["http"] = http_proxy
+    if https_proxy:
+        proxies["https"] = https_proxy
+    elif http_proxy:
+        proxies["https"] = http_proxy
+    return proxies
+
+
+PROXIES = load_proxies()
 
 # 动态获取的全局变量
 config = {
@@ -212,7 +225,7 @@ def main():
     # 1. 扫描参数
     print("[*] 正在初始化...")
     start_url = f"{site_url}/sign-up"
-    with requests.Session(impersonate="chrome120") as s:
+    with requests.Session(impersonate="chrome120", proxies=PROXIES) as s:
         try:
             html = s.get(start_url).text
             # Key
