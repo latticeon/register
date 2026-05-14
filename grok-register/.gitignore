@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 venv/
 keys/*
+gptmail_suffix_blacklist.txt

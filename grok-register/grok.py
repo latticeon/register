@@ -41,9 +41,70 @@ config = {
 
 post_lock = threading.Lock()
 file_lock = threading.Lock()
+blacklist_lock = threading.Lock()
 success_count = 0
 start_time = time.time()
 EMAIL_PROVIDER = str(os.getenv("EMAIL_PROVIDER") or "gptmail").strip().lower()
+GPTMAIL_SUFFIX_BLACKLIST_FILE = "gptmail_suffix_blacklist.txt"
+
+
+def get_email_suffix(email: str) -> str:
+    email = str(email or "").strip().lower()
+    if "@" not in email:
+        return ""
+    return email.split("@", 1)[1]
+
+
+def load_gptmail_suffix_blacklist() -> set[str]:
+    if not os.path.exists(GPTMAIL_SUFFIX_BLACKLIST_FILE):
+        return set()
+
+    with open(GPTMAIL_SUFFIX_BLACKLIST_FILE, "r", encoding="utf-8") as f:
+        return {
+            line.strip().lower()
+            for line in f
+            if line.strip() and not line.strip().startswith("#")
+        }
+
+
+GPTMAIL_SUFFIX_BLACKLIST = load_gptmail_suffix_blacklist()
+
+
+def is_blacklisted_gptmail_suffix(email: str) -> bool:
+    suffix = get_email_suffix(email)
+    if not suffix:
+        return False
+    with blacklist_lock:
+        return suffix in GPTMAIL_SUFFIX_BLACKLIST
+
+
+def blacklist_gptmail_suffix(email: str):
+    suffix = get_email_suffix(email)
+    if not suffix:
+        return
+
+    with blacklist_lock:
+        if suffix in GPTMAIL_SUFFIX_BLACKLIST:
+            return
+        GPTMAIL_SUFFIX_BLACKLIST.add(suffix)
+        with open(GPTMAIL_SUFFIX_BLACKLIST_FILE, "a", encoding="utf-8") as f:
+            f.write(suffix + "\n")
+
+    print(f"[!] 已拉黑 GPTMail 邮箱后缀: {suffix}")
+
+
+def create_available_email(email_service: EmailService, email_provider: str):
+    while True:
+        token_like, email = email_service.create_email()
+        if email_provider != "gptmail" or not email:
+            return token_like, email
+
+        if is_blacklisted_gptmail_suffix(email):
+            print(f"[-] GPTMail 邮箱后缀已拉黑，重新获取: {email}")
+            time.sleep(1)
+            continue
+
+        return token_like, email
 
 def generate_random_name() -> str:
     length = random.randint(4, 6)
@@ -119,7 +180,7 @@ def register_single_thread(email_provider: str = "gptmail"):
                 
                 # print(f"[debug] 线程-{threading.get_ident()} 正在请求创建邮箱...")
                 try:
-                    jwt, email = email_service.create_email()
+                    jwt, email = create_available_email(email_service, email_provider)
                 except Exception as e:
                     print(f"[-] 邮箱服务抛出异常: {e}")
                     jwt, email = None, None
@@ -148,6 +209,8 @@ def register_single_thread(email_provider: str = "gptmail"):
                             break
                 if not verify_code:
                     print(f"[-] {email} 未收到验证码")
+                    if email_provider == "gptmail":
+                        blacklist_gptmail_suffix(email)
                     continue
 
                 # Step 3: 验证验证码
